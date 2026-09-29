@@ -188,6 +188,26 @@ textarea{min-height:70px;resize:vertical}
 .tab[aria-current="page"]{color:var(--accent)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(80px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-size:14px;font-weight:600;z-index:6;max-width:calc(100% - 32px)}
 .backup{margin-top:12px;padding-top:16px;border-top:1px solid var(--line)}
+/* ficha de ejercicio */
+.ex-name{display:inline;background:none;border:0;padding:0;text-align:left;cursor:pointer}
+.ex-name .i,.n .i{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--accent);color:var(--accent);font:700 11px/1 var(--body);margin-left:6px;vertical-align:2px}
+button.n{background:none;border:0;padding:0;text-align:left;font-weight:600;cursor:pointer}
+.sheet{position:fixed;inset:0;z-index:20;background:rgba(10,12,14,.5);display:flex;align-items:flex-end;justify-content:center}
+.sheet-in{--m-on:var(--accent); --m-soft:color-mix(in srgb,var(--accent) 40%,var(--surface)); --m-idle:color-mix(in srgb,var(--ink) 20%,var(--surface)); --m-body:color-mix(in srgb,var(--ink) 8%,var(--surface));
+  background:var(--surface);color:var(--ink);width:100%;max-width:560px;max-height:90vh;max-height:90dvh;overflow:auto;border-radius:16px 16px 0 0;padding:16px 16px calc(20px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:14px;box-shadow:0 -8px 30px rgba(0,0,0,.25)}
+.sheet-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.sheet-x{border:1px solid var(--line);background:var(--surface-2);width:36px;height:36px;border-radius:50%;font-size:22px;line-height:1;flex:none}
+body.sheet-open{overflow:hidden}
+.bodymap{display:block;width:min(100%,340px);aspect-ratio:420/364;height:auto;margin-inline:auto;flex:none}
+.bodymap [fill^="var(--m-"]:not([fill="var(--m-body)"]){stroke:var(--surface);stroke-width:1.2}
+.bodymap text{fill:var(--muted);font:600 13px var(--body);letter-spacing:.06em;text-transform:uppercase}
+.mchips{display:flex;flex-wrap:wrap;gap:6px}
+.mchip{font-size:13px;font-weight:600;padding:4px 10px;border-radius:999px}
+.mchip.on{background:var(--accent);color:var(--accent-ink)}
+.mchip.soft{background:var(--m-soft);color:var(--ink)}
+.steps,.mistakes{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:6px}
+.mistakes li::marker{color:var(--hard)}
+.sheet .btn-primary{text-decoration:none;font-size:18px}
 .confirm{display:flex;flex-direction:column;gap:8px;background:var(--surface-2);border-radius:8px;padding:12px}
 </style>
 </head>
@@ -214,6 +234,7 @@ textarea{min-height:70px;resize:vertical}
   </div>
 </nav>
 <div class="toast" id="toast" hidden></div>
+<div class="sheet" id="sheet" hidden></div>
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
@@ -349,7 +370,7 @@ const S = {
   sessions:[], exStats:{}, active:null,
   tab:'train',
   cfg:{minutes:45, blocks:3, perBlock:3, rounds:3, style:'Musculación', focus:'', equip:{db:true,kb:true,bar:true,maq:true,pull:true}, swimEquip:{tabla:true,pullbuoy:true,palas:true,aletas:true,tubo:true}},
-  gen:null, genNote:'', confirm:null, needLogin:false, canImport:false, accountHtml:''
+  gen:null, genNote:'', confirm:null, needLogin:false, canImport:false, accountHtml:'', exInfo:{}, sheet:null
 };
 try{ const c = JSON.parse(localStorage.getItem('pizarra.cfg')||'null'); if(c){ const eq={...S.cfg.equip,...(c.equip||{})}, sw={...S.cfg.swimEquip,...(c.swimEquip||{})}; Object.assign(S.cfg,c); S.cfg.equip=eq; S.cfg.swimEquip=sw; } }catch(e){}
 const hasEq = (cfg,k) => !k || cfg.equip?.[k] !== false;
@@ -408,6 +429,221 @@ function recFor(name){
   else if(last.rpe==='mucho') w = w*0.93;
   else if(last.rpe==='normal' && prev && prev.rpe==='normal' && prev.w===last.w) w = w + (w>=20?2.5:1);
   return {w:roundW(w), last, unit:'kg'};
+}
+
+/* ---------- fichas de ejercicio ---------- */
+const MUSCLES = {
+  pecho:'Pectoral', hombros:'Hombros', biceps:'Bíceps', triceps:'Tríceps', antebrazos:'Antebrazos',
+  abdomen:'Abdomen', oblicuos:'Oblicuos', trapecio:'Trapecio', dorsales:'Dorsales', lumbares:'Zona lumbar',
+  gluteos:'Glúteos', cuadriceps:'Cuádriceps', isquios:'Isquiotibiales', aductores:'Aductores', gemelos:'Gemelos'
+};
+const MUSCLE_IDS = Object.keys(MUSCLES);
+// nombre → [principales, secundarios, pasos separados por |, error típico]
+const INFO = {
+  'Carrera':['cuadriceps isquios gemelos','gluteos abdomen','Tronco erguido y mirada al frente|Pisa bajo la cadera con cadencia alta|Brazos a 90° acompañando el paso','Zancada demasiado larga aterrizando con el talón'],
+  'SkiErg':['dorsales triceps','abdomen hombros gluteos','Brazos arriba con agarre firme|Tira hacia abajo flexionando cadera y tronco|Termina con las manos junto a los muslos y vuelve controlado','Tirar solo con los brazos sin usar la cadera'],
+  'Empuje de trineo':['cuadriceps gluteos','gemelos hombros triceps abdomen','Manos en los postes y cuerpo inclinado|Pasos cortos y potentes empujando con la punta del pie|Espalda neutra durante todo el recorrido','Cadera demasiado alta y pasos largos'],
+  'Arrastre de trineo':['dorsales biceps','antebrazos isquios gluteos lumbares','Cuerda tensa, pies firmes y cadera baja|Tira mano sobre mano llevando los codos atrás|Usa las piernas para estabilizarte','Redondear la espalda al tirar'],
+  'Burpee broad jump':['cuadriceps gluteos pecho','hombros triceps abdomen gemelos','Pecho al suelo|Levántate y salta hacia delante con los dos pies|Aterriza suave con las rodillas flexionadas','Aterrizar con las rodillas hacia dentro'],
+  'Remo ergómetro':['cuadriceps dorsales','gluteos isquios biceps lumbares','Ida: piernas, tronco y brazos, en ese orden|Vuelta: brazos, tronco y piernas|Espalda neutra y hombros bajos','Tirar con los brazos antes de empujar con las piernas'],
+  'Farmers carry':['antebrazos trapecio','abdomen oblicuos gluteos','Coge las cargas con agarre firme|Hombros atrás y abajo, tronco erguido|Pasos cortos y rápidos','Encoger los hombros o inclinarse hacia un lado'],
+  'Zancadas con sandbag':['cuadriceps gluteos','isquios aductores abdomen trapecio','Sandbag sobre los hombros y tronco erguido|Paso largo hasta que la rodilla trasera casi toque el suelo|Empuja con el talón delantero para avanzar','Rodilla delantera hacia dentro'],
+  'Wall balls':['cuadriceps gluteos hombros','triceps abdomen','Balón a la altura del pecho y sentadilla profunda|Sube explosivo y lanza al objetivo|Recibe el balón y baja directamente a la sentadilla','Lanzar solo con los brazos sin extender la cadera'],
+  'Kettlebell swing':['gluteos isquios','lumbares abdomen hombros antebrazos','Bisagra de cadera con la espalda neutra|Proyecta la cadera para impulsar la pesa|Brazos relajados: la pesa flota a la altura del pecho','Convertirlo en sentadilla o subir la pesa con los brazos'],
+  'Air bike':['cuadriceps','gluteos isquios hombros biceps triceps','Sillín a la altura de la cadera|Empuja y tira con brazos y piernas a la vez|Tronco estable, sin balancearte','Botar sobre el sillín a cadencia alta'],
+  'Sentadilla goblet':['cuadriceps gluteos','aductores abdomen hombros','Pesa pegada al pecho y codos abajo|Baja entre las piernas con el pecho alto|Sube empujando con todo el pie','Despegar los talones del suelo'],
+  'Burpees':['pecho cuadriceps','hombros triceps abdomen gluteos','Manos al suelo y pies atrás|Pecho al suelo y vuelve a subir|Salta con extensión completa y palmada arriba','Hundir la zona lumbar al bajar'],
+  'Zancadas caminando':['cuadriceps gluteos','isquios aductores abdomen','Tronco erguido y paso largo|Rodilla trasera casi al suelo|Empuja con el pie delantero y encadena el siguiente paso','Rodilla delantera hacia dentro'],
+  'Thruster con mancuernas':['cuadriceps gluteos hombros','triceps abdomen','Mancuernas en los hombros y sentadilla profunda|Sube explosivo y aprovecha el impulso para empujar arriba|Termina con los brazos estirados sobre la cabeza','Pararte arriba de la sentadilla antes de empujar'],
+  'Thruster':['cuadriceps gluteos hombros','triceps abdomen trapecio','Barra en rack frontal con los codos altos|Sentadilla profunda y sube explosivo|Usa el impulso para llevar la barra sobre la cabeza','Codos que caen en la sentadilla'],
+  'Power clean':['gluteos isquios cuadriceps trapecio','lumbares hombros antebrazos','Barra pegada a las espinillas y espalda neutra|Extiende la cadera de forma explosiva y encoge los hombros|Recibe en rack frontal con los codos altos','Tirar con los brazos antes de extender la cadera'],
+  'Dominadas':['dorsales biceps','antebrazos trapecio abdomen','Agarre prono algo más ancho que los hombros|Tira llevando el pecho a la barra|Baja controlado hasta estirar los brazos','Balancearte o hacer medias repeticiones'],
+  'Chin-ups':['dorsales biceps','antebrazos abdomen','Agarre supino a la anchura de los hombros|Sube hasta pasar la barbilla por encima de la barra|Baja controlado','Encoger los hombros hacia las orejas'],
+  'Box jump':['cuadriceps gluteos gemelos','isquios abdomen','Pies a la anchura de la cadera y brazos atrás|Salta con brazos y cadera|Aterriza suave y extiende arriba del cajón','Bajar saltando de espaldas'],
+  'Toes to bar':['abdomen','dorsales antebrazos oblicuos','Cuélgate con los brazos estirados|Balanceo corto activando el abdomen|Lleva los pies a tocar la barra','Balanceo descontrolado sin usar el abdomen'],
+  'Peso muerto':['gluteos isquios lumbares','cuadriceps trapecio antebrazos dorsales','Barra sobre el medio del pie y espalda neutra|Empuja el suelo y lleva la cadera adelante|Barra pegada al cuerpo todo el recorrido','Redondear la espalda'],
+  'Double unders':['gemelos','cuadriceps hombros antebrazos','Saltos pequeños sobre la punta de los pies|Gira la comba con las muñecas|Codos pegados al cuerpo','Doblar demasiado las rodillas'],
+  'Push press':['hombros triceps','cuadriceps gluteos trapecio abdomen','Barra en rack frontal|Pequeña flexión de rodillas e impulso vertical|Termina con la barra bloqueada sobre la cabeza','Echar la cadera atrás en el impulso'],
+  'Sentadilla frontal':['cuadriceps','gluteos abdomen trapecio','Barra en rack frontal con los codos altos|Baja con el tronco lo más vertical posible|Sube sin que caigan los codos','Codos que caen y tronco que se inclina'],
+  'Hang power snatch':['gluteos isquios trapecio hombros','cuadriceps lumbares triceps','Barra a la altura de los muslos con agarre ancho|Extensión explosiva de cadera|Recibe con los brazos bloqueados sobre la cabeza','Separar la barra del cuerpo'],
+  'Flexiones de brazos':['pecho triceps','hombros abdomen','Manos algo más anchas que los hombros|Cuerpo en línea recta de cabeza a talones|Baja hasta casi tocar el suelo con el pecho','Hundir la cadera'],
+  'Snatch con mancuerna':['gluteos hombros','isquios cuadriceps trapecio','Mancuerna entre los pies y espalda neutra|Extiende la cadera y tira alto pegado al cuerpo|Bloquea el brazo sobre la cabeza','Hacer un press en vez de usar la cadera'],
+  'Clean con kettlebell':['gluteos isquios','antebrazos hombros biceps','Bisagra de cadera con la pesa entre las piernas|Impulsa y lleva la pesa al rack pegada al cuerpo|Recíbela suave sobre el antebrazo','Dejar que la pesa golpee el antebrazo'],
+  'Air squats':['cuadriceps gluteos','aductores abdomen','Pies a la anchura de los hombros|Baja por debajo del paralelo|Rodillas en la línea de los pies','Despegar los talones'],
+  'V-ups':['abdomen','oblicuos cuadriceps','Tumbado boca arriba con los brazos estirados|Sube piernas y tronco a la vez|Toca los pies y baja controlado','Doblar mucho las rodillas'],
+  'Sentadilla trasera':['cuadriceps gluteos','aductores lumbares abdomen','Barra sobre los trapecios y pies a la anchura de los hombros|Baja con el pecho alto hasta romper el paralelo|Sube empujando el suelo con todo el pie','Rodillas hacia dentro o talones que se levantan'],
+  'Press banca':['pecho triceps','hombros','Escápulas juntas y pies firmes en el suelo|Baja la barra a la mitad del pecho|Empuja hasta estirar los brazos','Rebotar la barra en el pecho'],
+  'Peso muerto rumano':['isquios gluteos','lumbares antebrazos','Rodillas ligeramente flexionadas|Baja la carga pegada a las piernas echando la cadera atrás|Sube apretando glúteos','Redondear la espalda al bajar'],
+  'Remo con barra':['dorsales trapecio','biceps lumbares hombros','Tronco inclinado unos 45° con la espalda neutra|Lleva la barra al ombligo|Junta las escápulas arriba','Levantar el tronco para mover la barra'],
+  'Press militar':['hombros triceps','trapecio abdomen','Barra en los hombros y glúteos apretados|Empuja en vertical pasando la cabeza|Bloquea los brazos arriba','Arquear la zona lumbar'],
+  'Zancadas con mancuernas':['cuadriceps gluteos','isquios aductores antebrazos','Mancuernas a los lados y tronco erguido|Paso largo hasta que la rodilla trasera casi toque el suelo|Vuelve empujando con el pie delantero','Rodilla delantera hacia dentro'],
+  'Curl bíceps con mancuernas':['biceps','antebrazos','Codos pegados al cuerpo|Sube girando la muñeca hacia arriba|Baja lento','Balancear el tronco'],
+  'Extensión de tríceps en polea':['triceps','','Codos fijos junto al cuerpo|Extiende hasta bloquear los brazos|Vuelve lento','Mover los codos adelante y atrás'],
+  'Hip thrust':['gluteos','isquios cuadriceps','Espalda alta en el banco y barra en la cadera|Sube hasta alinear tronco y muslos|Aprieta los glúteos arriba un segundo','Arquear la zona lumbar en vez de extender la cadera'],
+  'Jalón al pecho':['dorsales','biceps trapecio','Agarre algo más ancho que los hombros|Baja la barra al pecho sacando pecho|Sube controlado','Echar el tronco atrás para tirar'],
+  'Press inclinado con mancuernas':['pecho hombros','triceps','Banco a 30–45°|Baja las mancuernas a los lados del pecho|Empuja juntándolas arriba','Abrir demasiado los codos'],
+  'Elevaciones laterales':['hombros','trapecio','Codos ligeramente flexionados|Sube hasta la altura de los hombros|Baja lento','Encoger los hombros o balancearte'],
+  'Prensa de piernas':['cuadriceps gluteos','isquios aductores','Pies a la anchura de la cadera en la plataforma|Baja hasta unos 90° sin despegar la zona lumbar|Empuja sin bloquear las rodillas','Despegar la cadera del respaldo'],
+  'Remo con mancuerna':['dorsales','biceps trapecio hombros','Apoya rodilla y mano en el banco|Lleva la mancuerna hacia la cadera|Baja estirando el dorsal','Girar el tronco para subir la pesa'],
+  'Press de hombro con mancuernas':['hombros triceps','trapecio','Mancuernas a la altura de las orejas|Empuja hasta estirar los brazos|Baja controlado','Arquear la zona lumbar'],
+  'Curl femoral en máquina':['isquios','gemelos','Rodilla alineada con el eje de la máquina|Flexiona llevando el rodillo hacia los glúteos|Vuelve lento','Levantar la cadera del asiento'],
+  'Extensión de cuádriceps':['cuadriceps','','Rodilla alineada con el eje de la máquina|Extiende hasta casi bloquear|Baja controlado','Dar impulso con la cadera'],
+  'Elevaciones de piernas colgado':['abdomen','oblicuos antebrazos','Cuélgate sin moverte|Sube las piernas sin balanceo|Baja controlado','Balancearte para subir'],
+  'Sentadilla búlgara':['cuadriceps gluteos','aductores isquios','Pie trasero apoyado en el banco|Baja en vertical hasta que la rodilla casi toque el suelo|Empuja con el pie delantero','Pie delantero demasiado cerca del banco'],
+  'Fondos en banco':['triceps','pecho hombros','Manos en el banco y cadera cerca de él|Baja hasta 90° de codo|Sube estirando los brazos','Abrir los codos hacia fuera'],
+  'Puente de glúteo a una pierna':['gluteos','isquios','Tumbado con un pie apoyado|Sube la cadera apretando el glúteo|Mantén la cadera nivelada','Girar la cadera hacia un lado'],
+  'Mountain climbers':['abdomen','hombros cuadriceps oblicuos','Posición de plancha alta|Lleva las rodillas al pecho alternando|Cadera baja y estable','Subir la cadera'],
+  'Zancadas con salto':['cuadriceps gluteos','gemelos isquios','Zancada con el tronco erguido|Salta y cambia de pierna en el aire|Aterriza suave y encadena','Rodilla delantera hacia dentro'],
+  'Skater jumps':['gluteos cuadriceps','aductores gemelos','Salta en lateral a una pierna|Aterriza estable flexionando la rodilla|Brazos acompañando el salto','Aterrizar con la rodilla rígida'],
+  'Plank jacks':['abdomen hombros','aductores gemelos','Plancha alta con el cuerpo en línea|Abre y cierra los pies saltando|Cadera estable','Balancear la cadera'],
+  'Sprint en cinta':['cuadriceps isquios gluteos','gemelos abdomen','Sube la velocidad progresivamente|Cadencia alta y brazos activos|Apóyate en los laterales para bajar de la cinta','Agarrarte a la barandilla mientras corres'],
+  'Sentadilla con salto':['cuadriceps gluteos','gemelos','Sentadilla a media profundidad|Salta explosivo|Aterriza suave y enlaza la siguiente','Aterrizar con las piernas rígidas'],
+  'Rodillas al pecho':['cuadriceps abdomen','gemelos','Corre en el sitio|Sube las rodillas a la altura de la cadera|Brazos rápidos','Echar el tronco atrás'],
+};
+const INFO_ALIAS = {
+  'Farmers carry con kettlebell':'Farmers carry','Power clean con barra':'Power clean','Peso muerto rumano con mancuernas':'Peso muerto rumano',
+  'Remo con kettlebell':'Remo con mancuerna','Press de hombro con kettlebell':'Press de hombro con mancuernas','Goblet squat con kettlebell':'Sentadilla goblet',
+};
+// Natación: se busca por palabras clave (de lo más concreto a lo más general)
+const SWIM_INFO = [
+  [/a un brazo/i,['dorsales hombros','triceps abdomen oblicuos','Un brazo estirado delante; nada solo con el otro|Respira hacia el lado del brazo que trabaja|Rota el cuerpo con cada brazada','Cruzar la mano por delante de la cabeza']],
+  [/toque de hombro/i,['dorsales hombros','triceps abdomen','Al sacar el brazo, toca tu hombro con la mano|Recobro con el codo alto y relajado|Entrada de la mano a la anchura del hombro','Recobro con el brazo estirado y tenso']],
+  [/batido|patada/i,['cuadriceps gluteos','gemelos abdomen isquios','Brazos estirados sobre la tabla|Patada desde la cadera con rodillas poco flexionadas|Tobillos relajados y pies en punta','Patada de bicicleta desde la rodilla']],
+  [/palas/i,['dorsales pecho hombros','triceps biceps antebrazos','Palas bien ajustadas a la mano|Entrada limpia y agarre largo hasta la cadera|Series cortas al principio para proteger los hombros','Entrada con salpicadura que carga el hombro']],
+  [/pull/i,['dorsales pecho hombros','triceps abdomen','Pull-buoy entre los muslos|Brazada larga y completa hasta la cadera|Rota el cuerpo con cada brazada','Dejar caer las piernas por no activar el abdomen']],
+  [/aletas/i,['cuadriceps gluteos dorsales','gemelos hombros abdomen','Patada amplia desde la cadera|Mantén la técnica de brazos a mayor velocidad|Aprovecha para trabajar una posición alta en el agua','Doblar demasiado las rodillas']],
+  [/tubo/i,['dorsales hombros','triceps abdomen','Cabeza quieta mirando al fondo|Céntrate en el agarre y el empuje|Cuerpo alineado sin girar la cabeza','Levantar la cabeza']],
+  [/hip[oó]xic/i,['dorsales hombros','triceps abdomen','Respira cada 5 brazadas|Suelta el aire despacio bajo el agua|Si te mareas, vuelve a respirar cada 3','Aguantar el aire en vez de soltarlo']],
+  [/estilos/i,['dorsales hombros pecho','triceps cuadriceps abdomen','Orden: mariposa, espalda, braza y crol|Cuida el viraje de cada cambio de estilo|Reparte el esfuerzo entre los cuatro','Salir demasiado rápido en la mariposa']],
+  [/mariposa/i,['dorsales pecho hombros','abdomen lumbares triceps','Ondulación que nace en el pecho|Dos patadas por cada brazada|Respira hacia delante al final del empuje','Recobro de brazos hundido en el agua']],
+  [/espalda/i,['dorsales hombros','triceps gluteos abdomen','Cuerpo horizontal con la cadera arriba|Entrada con el meñique y el brazo estirado|Patada continua desde la cadera','Sentarte en el agua con la cadera baja']],
+  [/braza/i,['pecho aductores cuadriceps','hombros triceps gluteos','Tirón corto hacia fuera y hacia dentro|Patada de rana con los pies girados hacia fuera|Desliza con el cuerpo estirado tras la patada','Tirar de los brazos hasta la cadera']],
+  [/./,['dorsales hombros','triceps pecho abdomen','Cuerpo horizontal y cabeza neutra|Agarre con el codo alto y empuje hasta la cadera|Respira girando con el cuerpo, con un ojo fuera del agua','Levantar la cabeza para respirar']],
+];
+// Músculos aproximados para ejercicios que no están en la tabla
+const MUSCLE_GUESS = [
+  [/sentadilla|squat|prensa/i,'cuadriceps gluteos','aductores abdomen'],[/peso muerto|deadlift|buenos d/i,'isquios gluteos lumbares','antebrazos trapecio'],
+  [/press banca|press de banca|bench|aperturas|fondos/i,'pecho triceps','hombros'],[/press|push|militar|arnold/i,'hombros triceps','trapecio'],
+  [/dominad|jal[oó]n|pull-?up|chin/i,'dorsales biceps','antebrazos'],[/remo|row/i,'dorsales trapecio','biceps lumbares'],
+  [/curl femoral|isquio|nordic/i,'isquios','gemelos'],[/curl/i,'biceps','antebrazos'],[/tr[ií]ceps|franc[eé]s/i,'triceps',''],
+  [/zancada|lunge|step|b[uú]lgara/i,'cuadriceps gluteos','isquios aductores'],[/hip thrust|puente|gl[uú]te/i,'gluteos','isquios'],
+  [/plancha|crunch|abdom|core|hollow|v-up|toes/i,'abdomen','oblicuos'],[/gemelo|pantorr|calf/i,'gemelos',''],
+  [/elevaci|lateral|p[aá]jaro|face pull/i,'hombros','trapecio'],[/swing|kettlebell/i,'gluteos isquios','lumbares hombros'],
+  [/burpee/i,'pecho cuadriceps','hombros abdomen'],[/carrera|correr|sprint|salto|jump|comba|bici|bike/i,'cuadriceps gemelos','gluteos isquios'],
+];
+function splitM(s){ return String(s||'').split(/\s+/).filter(m=>MUSCLES[m]); }
+function infoFor(name, style){
+  const cached = S.exInfo?.[slug(name)];
+  if(cached?.steps?.length) return {...cached, source:'ia'};
+  if(isSwim(style)){
+    const hit = SWIM_INFO.find(([re])=>re.test(name))[1];
+    return {primary:splitM(hit[0]), secondary:splitM(hit[1]), steps:hit[2].split('|'), mistakes:[hit[3]], source:'local'};
+  }
+  const row = INFO[name] || INFO[INFO_ALIAS[name]];
+  if(row) return {primary:splitM(row[0]), secondary:splitM(row[1]), steps:row[2].split('|'), mistakes:[row[3]], source:'local'};
+  const g = MUSCLE_GUESS.find(([re])=>re.test(name));
+  return {primary:g?splitM(g[1]):[], secondary:g?splitM(g[2]):[], steps:[], mistakes:[], source:'guess'};
+}
+async function fetchInfo(name, style){
+  const prompt = `Ficha técnica del ejercicio "${name}"${isSwim(style)?` (natación en piscina de ${POOL} m)`:` (entrenamiento de ${style})`}, para una persona de nivel intermedio.
+Responde SOLO con JSON con esta forma:
+{"primary":["cuadriceps"],"secondary":["gluteos"],"steps":["paso 1","paso 2","paso 3"],"mistakes":["error 1","error 2"]}
+- "primary": 1 a 3 músculos principales y "secondary": 0 a 4 secundarios, usando SOLO estos identificadores: ${MUSCLE_IDS.join(', ')}.
+- "steps": 3 o 4 pasos de ejecución en español, cortos (máximo 14 palabras cada uno).
+- "mistakes": 2 errores típicos, cortos.`;
+  const r = await S.sample.json(prompt, {modelTier:'quick'});
+  const clean = a => (Array.isArray(a)?a:[]).map(String).filter(m=>MUSCLES[m]).slice(0,4);
+  const info = {name, primary:clean(r?.primary), secondary:clean(r?.secondary),
+    steps:(Array.isArray(r?.steps)?r.steps:[]).map(x=>String(x).slice(0,140)).slice(0,5),
+    mistakes:(Array.isArray(r?.mistakes)?r.mistakes:[]).map(x=>String(x).slice(0,140)).slice(0,3), updatedAt:Date.now()};
+  if(!info.steps.length) throw {code:'invalid_json'};
+  S.exInfo[slug(name)] = info;
+  if(S.db) queueWrite(()=>S.db.collection('exinfo').doc(slug(name)).set(info));
+  return info;
+}
+function subscribeExInfo(db){
+  return db.collection('exinfo').onSnapshot(snap=>{
+    const m={}; snap.docs.forEach(d=>{ m[d.id]=d.data(); }); S.exInfo={...S.exInfo, ...m};
+    if(S.sheet) renderSheet();
+  }, ()=>{});
+}
+
+/* mapa muscular: media figura que se refleja; frente y espalda */
+function bodyMap(primary, secondary){
+  const P=new Set(primary), Sd=new Set(secondary);
+  const fill = id => P.has(id) ? 'var(--m-on)' : Sd.has(id) ? 'var(--m-soft)' : 'var(--m-idle)';
+  const base = `<circle cx="100" cy="30" r="16"/><rect x="92" y="42" width="16" height="14" rx="3"/>`;
+  const half = `<path d="M100 54 L84 56 L70 62 Q60 66 60 78 L64 104 L70 132 L72 168 L100 172 Z"/>
+    <rect x="48" y="66" width="16" height="58" rx="8"/><rect x="44" y="120" width="14" height="58" rx="7"/>
+    <ellipse cx="51" cy="186" rx="7" ry="9"/><rect x="72" y="164" width="27" height="88" rx="12"/>
+    <rect x="75" y="248" width="20" height="78" rx="9"/><ellipse cx="84" cy="332" rx="11" ry="5"/>`;
+  const m = (id, shape) => shape.replace('/>', ` fill="${fill(id)}"><title>${MUSCLES[id]}</title></${shape.match(/^<(\w+)/)[1]}>`);
+  const front = [
+    m('trapecio','<path d="M92 54 L76 60 L92 63 Z"/>'),
+    m('hombros','<ellipse cx="62" cy="76" rx="10" ry="12"/>'),
+    m('pecho','<path d="M98 64 L77 64 Q69 72 72 88 Q84 96 98 92 Z"/>'),
+    m('biceps','<ellipse cx="56" cy="101" rx="6.5" ry="16"/>'),
+    m('antebrazos','<ellipse cx="51" cy="146" rx="6" ry="20"/>'),
+    m('oblicuos','<path d="M74 100 L86 102 L86 150 L76 156 Q72 128 74 100 Z"/>'),
+    m('abdomen','<rect x="88" y="98" width="11" height="60" rx="4"/>'),
+    m('cuadriceps','<ellipse cx="84" cy="208" rx="11" ry="34"/>'),
+    m('aductores','<ellipse cx="96" cy="196" rx="3.5" ry="18"/>'),
+    m('gemelos','<ellipse cx="81" cy="282" rx="5" ry="20"/>'),
+  ].join('');
+  const back = [
+    m('dorsales','<path d="M97 100 L76 70 Q64 84 70 110 Q76 134 97 146 Z"/>'),
+    m('trapecio','<path d="M100 50 L78 60 L100 110 Z"/>'),
+    m('hombros','<ellipse cx="62" cy="76" rx="10" ry="12"/>'),
+    m('triceps','<ellipse cx="56" cy="101" rx="6.5" ry="16"/>'),
+    m('antebrazos','<ellipse cx="51" cy="146" rx="6" ry="20"/>'),
+    m('lumbares','<rect x="88" y="140" width="11" height="24" rx="4"/>'),
+    m('gluteos','<ellipse cx="86" cy="183" rx="13" ry="15"/>'),
+    m('isquios','<ellipse cx="85" cy="224" rx="11" ry="27"/>'),
+    m('gemelos','<ellipse cx="85" cy="280" rx="8" ry="20"/>'),
+  ].join('');
+  const fig = (muscles, dx, label) => `<g transform="translate(${dx},0)">
+      <g fill="var(--m-body)">${base}${half}<g transform="translate(200,0) scale(-1,1)">${half}</g></g>
+      ${muscles}<g transform="translate(200,0) scale(-1,1)">${muscles}</g>
+      <text x="100" y="356" text-anchor="middle">${label}</text></g>`;
+  return `<svg class="bodymap" viewBox="0 0 420 364" role="img" aria-label="Músculos trabajados">${fig(front,0,'Frente')}${fig(back,220,'Espalda')}</svg>`;
+}
+
+function ytLink(name, style){
+  const q = isSwim(style) ? `técnica ${name.replace(/\d+\s*m\b/g,'').replace(/\(.*?\)/g,'').trim()} natación` : `técnica ${name}`;
+  return 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q);
+}
+function openSheet(name, style){ S.sheet = {name, style, loading:false, error:''}; renderSheet(); maybeFetchInfo(); }
+function closeSheet(){ S.sheet=null; renderSheet(); }
+async function maybeFetchInfo(){
+  const sh=S.sheet; if(!sh) return;
+  const info = infoFor(sh.name, sh.style);
+  if(info.source!=='guess' || !S.sample) return;
+  sh.loading=true; renderSheet();
+  try{ await fetchInfo(sh.name, sh.style); }
+  catch(e){ if(S.sheet===sh) sh.error = 'No se pudo preparar la explicación ahora. Prueba con el vídeo.'; }
+  if(S.sheet===sh){ sh.loading=false; renderSheet(); }
+}
+function renderSheet(){
+  const el = $('#sheet');
+  if(!S.sheet){ el.hidden=true; el.innerHTML=''; document.body.classList.remove('sheet-open'); return; }
+  const {name, style, loading, error} = S.sheet;
+  const info = infoFor(name, style);
+  const chips = (ids, cls) => ids.map(id=>`<span class="mchip ${cls}">${MUSCLES[id]}</span>`).join('');
+  el.hidden=false; document.body.classList.add('sheet-open');
+  el.innerHTML = `<div class="sheet-in" role="dialog" aria-modal="true" aria-label="Ficha de ${esc(name)}">
+    <div class="sheet-head"><div><div class="label">${esc(style||'Ejercicio')}</div><h2>${esc(name)}</h2></div>
+      <button class="sheet-x" data-act="sheet-close" aria-label="Cerrar">×</button></div>
+    ${bodyMap(info.primary, info.secondary)}
+    ${info.primary.length||info.secondary.length ? `<div class="mchips">${chips(info.primary,'on')}${chips(info.secondary,'soft')}</div>
+      <div class="legend"><span><i class="dot" style="background:var(--m-on)"></i>Principal</span><span><i class="dot" style="background:var(--m-soft)"></i>Secundario</span></div>` : ''}
+    ${info.steps.length ? `<div class="field"><div class="label">Cómo se hace</div><ol class="steps">${info.steps.map(x=>`<li>${esc(x)}</li>`).join('')}</ol></div>` : ''}
+    ${info.mistakes.length ? `<div class="field"><div class="label">Evita</div><ul class="mistakes">${info.mistakes.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+    ${loading ? `<div class="thinking"><div class="bar-anim"></div><div>Preparando la explicación…</div></div>` : ''}
+    ${error ? `<div class="note warn">${esc(error)}</div>` : ''}
+    ${!loading && !info.steps.length && !error ? `<div class="note">Aún no hay explicación para este ejercicio. Mira la técnica en vídeo.</div>` : ''}
+    <a class="btn btn-primary" href="${ytLink(name, style)}" target="_blank" rel="noopener">Ver vídeo de la técnica</a>
+    <div class="muted" style="font-size:12px;text-align:center">Se abre una búsqueda en YouTube en otra pestaña.</div>
+  </div>`;
 }
 
 /* ---------- base de datos ---------- */
@@ -475,6 +711,7 @@ function startData(user){
     S.dbReady = true;
     softRender();
   }, e=>{ console.error(e); S.dbReady=true; toast('No se pudo leer el historial.'); render(); }));
+  unsubs.push(subscribeExInfo(db));
   unsubs.push(db.collection('exercises').onSnapshot(snap=>{
     const m={}; snap.docs.forEach(d=>{ m[d.id]=d.data(); }); S.exStats=m;
     softRender();
@@ -484,7 +721,7 @@ function initFirebase(){
   onAuthStateChanged(auth, user=>{
     if(!user){
       unsubs.forEach(u=>u()); unsubs=[];
-      Object.assign(S, {db:null, sample:null, sessions:[], exStats:{}, active:null, needLogin:true, dbReady:true, accountHtml:''});
+      Object.assign(S, {db:null, sample:null, sessions:[], exStats:{}, exInfo:{}, sheet:null, active:null, needLogin:true, dbReady:true, accountHtml:''});
       render(); return;
     }
     S.needLogin = false; S.dbReady = false; render();
@@ -864,7 +1101,7 @@ function exCard(e,bi,ei){
   return `<article class="ex ${e.rpe?'done':''}" data-b="${bi}" data-e="${ei}">
     <div class="ex-top">
       <span class="code">${letter(bi)}${ei+1}</span>
-      <div><div class="ex-name">${esc(e.name)}</div>${String(e.reps).length>10?`<div class="reps-line num">${esc(e.reps)}</div>`:''}${e.tip?`<div class="tip">${esc(e.tip)}</div>`:''}</div>
+      <div><button class="ex-name" data-act="info" data-name="${esc(e.name)}" data-style="${esc(S.active?.style||'')}" aria-label="Ver ficha de ${esc(e.name)}">${esc(e.name)}<span class="i" aria-hidden="true">i</span></button>${String(e.reps).length>10?`<div class="reps-line num">${esc(e.reps)}</div>`:''}${e.tip?`<div class="tip">${esc(e.tip)}</div>`:''}</div>
       <span class="reps num">${String(e.reps).length>10?'':esc(/^\d+$/.test(e.reps)?e.reps+' reps':e.reps)}</span>
     </div>
     <div class="rec">${e.weight!=null?`${pace?'Ritmo objetivo':'Recomendado'} <b class="num">${fv(e.weight)} ${ut}</b> · `:''}${lastTxt}</div>
@@ -959,7 +1196,7 @@ function viewStats(){
       const d = first&&lastW ? lastW.w-first.w : 0;
       const delta = !d ? '' : pace ? `${Math.abs(d)} s/100 m ${d<0?'más rápido':'más lento'} desde el inicio` : `${d>0?'+':''}${fmtKg(d)} kg desde el inicio`;
       return `<div class="exrow">
-        <div><div class="n">${esc(st.name)}</div><div class="muted num" style="font-size:13px">${st.history.length} registros · último ${h.w==null?(pace?'sin ritmo':'sin carga'):fmtVal(h.w, st.unit)}${h.rpe?` (${h.rpe})`:''}${delta?` · ${delta}`:''}</div></div>
+        <div><button class="n" data-act="info" data-name="${esc(st.name)}" data-style="${esc(h.style||'')}">${esc(st.name)}<span class="i" aria-hidden="true">i</span></button><div class="muted num" style="font-size:13px">${st.history.length} registros · último ${h.w==null?(pace?'sin ritmo':'sin carga'):fmtVal(h.w, st.unit)}${h.rpe?` (${h.rpe})`:''}${delta?` · ${delta}`:''}</div></div>
         <div class="next num">${r?(pace?fmtPace(r.w):fmtKg(r.w)):'—'}<small>${r?(pace?'/100 m próximo':'kg próxima'):(pace?'sin ritmo':'sin carga')}</small></div>
         ${spark(st.history, pace)}
       </div>`;}).join('')}
@@ -985,6 +1222,7 @@ function updateProgress(){
 document.addEventListener('click', e=>{
   const tabBtn = e.target.closest('[data-tab]');
   if(tabBtn){ S.tab=tabBtn.dataset.tab; S.confirm=null; render(); window.scrollTo({top:0}); return; }
+  if(e.target.id==='sheet'){ closeSheet(); return; }
   const b = e.target.closest('[data-act]'); if(!b) return;
   const act=b.dataset.act, c=S.cfg;
   const card=b.closest('.ex'); const bi=card?+card.dataset.b:null, ei=card?+card.dataset.e:null;
@@ -1013,6 +1251,8 @@ document.addEventListener('click', e=>{
       w.done=!w.done; b.setAttribute('aria-pressed', w.done);
       const c2=$('#wu-count'); if(c2) c2.textContent=`${S.active.warmup.filter(x=>x.done).length} de ${S.active.warmup.length} hechos`;
       saveActiveSoon(); break; }
+    case 'info': openSheet(b.dataset.name, b.dataset.style); break;
+    case 'sheet-close': closeSheet(); break;
     case 'finish': finishSession(); break;
     case 'export': exportData(); break;
     case 'discard': S.confirm='discard'; render(); break;
@@ -1033,6 +1273,7 @@ document.addEventListener('input', e=>{
     ex.done = v==='' || !isFinite(n) ? null : n; saveActiveSoon();
   }
 });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && S.sheet) closeSheet(); });
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') saveActiveNow(); });
 
 render();
