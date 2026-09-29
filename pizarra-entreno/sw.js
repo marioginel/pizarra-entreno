@@ -1,8 +1,8 @@
 // Permite abrir la app sin conexión (los datos los guarda Firestore en el propio móvil).
 // Si cambias la app, sube el número de versión para forzar la actualización.
-const CACHE = 'pizarra-v1';
+const CACHE = 'pizarra-v2';
 const SHELL = ['/', '/index.html', '/config.js', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png'];
-
+ 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
@@ -20,3 +20,4 @@ self.addEventListener('fetch', e => {
     e.respondWith(caches.match(e.request).then(r => r || fetch(e.request).then(save)));
   }
 });
+ 
